@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Data Dash - Viral Web Edition</title>
+<style>
+body { margin:0; overflow:hidden; background:#111; font-family:sans-serif; }
+#score { position:absolute; top:10px; left:10px; font-size:24px; color:#fff; }
+#combo { position:absolute; top:40px; left:10px; font-size:20px; color:#ff0; }
+#powerup { position:absolute; top:70px; left:10px; font-size:20px; color:#0ff; }
+#gameOver { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            font-size:36px; display:none; text-align:center; color:#f44; }
+</style>
+</head>
+<body>
+
+<div id="score">Score: 0</div>
+<div id="combo">Combo: 0x</div>
+<div id="powerup">Shield: OFF</div>
+<div id="gameOver">Game Over!<br>Refresh to play again.</div>
+
+<audio id="bgm" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_2aabff6b3f.mp3?filename=funk-loop-01-110880.mp3" loop autoplay></audio>
+<audio id="jumpSound" src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_52b9623e3f.mp3?filename=jump-4388.mp3"></audio>
+<audio id="collectSound" src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_c9bb081123.mp3?filename=coin-48470.mp3"></audio>
+<audio id="powerupSound" src="https://cdn.pixabay.com/download/audio/2022/03/01/audio_71b3a6c1b2.mp3?filename=powerup-5017.mp3"></audio>
+<audio id="hitSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_54a8bcf7d2.mp3?filename=hit-4953.mp3"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
+<script>
+
+// --- Scene & Camera ---
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+camera.position.set(0,6,12);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// --- Lights ---
+const light = new THREE.DirectionalLight(0xffffff,1);
+light.position.set(10,20,10);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0x404040));
+
+// --- Player ---
+const playerGeo = new THREE.BoxGeometry(1,1,1);
+const playerMat = new THREE.MeshStandardMaterial({color:0x00ff00});
+const player = new THREE.Mesh(playerGeo, playerMat);
+player.position.set(0,0.5,0);
+scene.add(player);
+
+// --- Track ---
+const trackLength = 50;
+const trackWidth = 10;
+const trackSegments = [];
+for(let i=0;i<5;i++){
+    const geo = new THREE.PlaneGeometry(trackWidth,trackLength);
+    const mat = new THREE.MeshStandardMaterial({color:0x3333ff});
+    const plane = new THREE.Mesh(geo,mat);
+    plane.rotation.x = -Math.PI/2;
+    plane.position.z = -i*trackLength;
+    scene.add(plane);
+    trackSegments.push(plane);
+}
+
+// --- Objects ---
+const obstacles = [];
+const collectibles = [];
+const powerups = [];
+const particles = [];
+
+// --- Sounds ---
+const jumpSound = document.getElementById('jumpSound');
+const collectSound = document.getElementById('collectSound');
+const powerupSound = document.getElementById('powerupSound');
+const hitSound = document.getElementById('hitSound');
+
+// --- Helper: create particles ---
+function createParticles(x,y,z,color,count=10){
+    for(let i=0;i<count;i++){
+        const geo = new THREE.SphereGeometry(0.05,4,4);
+        const mat = new THREE.MeshBasicMaterial({color});
+        const p = new THREE.Mesh(geo,mat);
+        p.position.set(x,y,z);
+        p.velocity = {x:(Math.random()-0.5)*0.2,y:Math.random()*0.3,z:(Math.random()-0.5)*0.2};
+        scene.add(p);
+        particles.push(p);
+    }
+}
+
+// --- Spawns ---
+function spawnObstacle(z){
+    const geo = new THREE.BoxGeometry(1,1,1);
+    const mat = new THREE.MeshStandardMaterial({color:0xff4444});
+    const obs = new THREE.Mesh(geo,mat);
+    obs.position.x = [-3,0,3][Math.floor(Math.random()*3)];
+    obs.position.y = 0.5;
+    obs.position.z = z;
+    obs.type = ['static','moving','spinning'][Math.floor(Math.random()*3)];
+    scene.add(obs);
+    obstacles.push(obs);
+}
+
+function spawnCollectible(z){
+    const geo = new THREE.IcosahedronGeometry(0.4,0);
+    const mat = new THREE.MeshStandardMaterial({color:0xffff00});
+    const col = new THREE.Mesh(geo,mat);
+    col.position.x = [-3,0,3][Math.floor(Math.random()*3)];
+    col.position.y = 0.5;
+    col.position.z = z;
+    scene.add(col);
+    collectibles.push(col);
+}
+
+function spawnPowerup(z){
+    const geo = new THREE.ConeGeometry(0.5,1,8);
+    const mat = new THREE.MeshStandardMaterial({color:0x00ffff});
+    const pu = new THREE.Mesh(geo,mat);
+    pu.position.x = [-3,0,3][Math.floor(Math.random()*3)];
+    pu.position.y = 0.5;
+    pu.position.z = z;
+    pu.rotation.x = Math.PI;
+    scene.add(pu);
+    powerups.push(pu);
+}
+
+// --- Controls ---
+const move = {left:false,right:false,jump:false};
+let isJumping=false;
+let jumpVelocity=0;
+document.addEventListener('keydown',(e)=>{
+    if(e.key==="ArrowLeft") move.left=true;
+    if(e.key==="ArrowRight") move.right=true;
+    if(e.key===" " && !isJumping){ move.jump=true; jumpVelocity=0.25; isJumping=true; jumpSound.play();}
+});
+document.addEventListener('keyup',(e)=>{
+    if(e.key==="ArrowLeft") move.left=false;
+    if(e.key==="ArrowRight") move.right=false;
+});
+
+// --- Mobile Swipe ---
+let touchStartX=0;
+document.addEventListener('touchstart',(e)=>{ touchStartX = e.touches[0].clientX; });
+document.addEventListener('touchend',(e)=>{
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+    if(deltaX>50) move.right=true;
+    else if(deltaX<-50) move.left=true;
+    setTimeout(()=>{move.left=false; move.right=false;},100);
+    if(Math.abs(deltaX)<10 && !isJumping){ move.jump=true; jumpVelocity=0.25; isJumping=true; jumpSound.play();}
+});
+
+// --- Game Variables ---
+let speed=0.5;
+let score=0;
+let combo=0;
+let comboTimer=0;
+let shield=false;
+let gameOver=false;
+let chaosTimer=0;
+
+// --- Leaderboard ---
+let leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
+
+// --- Animate ---
+function animate(){
+    if(gameOver) return;
+    requestAnimationFrame(animate);
+
+    // Player
+    if(move.left) player.position.x -= 0.2;
+    if(move.right) player.position.x += 0.2;
+    player.position.x = THREE.MathUtils.clamp(player.position.x,-4,4);
+    if(isJumping){ player.position.y += jumpVelocity; jumpVelocity-=0.012; if(player.position.y<=0.5){player.position.y=0.5; isJumping=false;}}
+
+    // Track scroll
+    trackSegments.forEach(seg=>{
+        seg.position.z += speed;
+        if(seg.position.z>camera.position.z+trackLength/2) seg.position.z-=trackSegments.length*trackLength;
+    });
+
+    // Chaos speed bursts
+    if(Math.random()<0.005 && chaosTimer<=0){ speed+=0.3; chaosTimer=120; }
+    if(chaosTimer>0){ chaosTimer--; if(chaosTimer==0) speed=0.5; }
+
+    // Spawn
+    if(Math.random()<0.02) spawnObstacle(camera.position.z-50);
+    if(Math.random()<0.01) spawnCollectible(camera.position.z-50);
+    if(Math.random()<0.005) spawnPowerup(camera.position.z-50);
+
+    // Obstacles
+    for(let i=obstacles.length-1;i>=0;i--){
+        const o = obstacles[i];
+        if(o.type==='moving') o.position.x += Math.sin(Date.now()*0.005)*0.05;
+        if(o.type==='spinning') o.rotation.y += 0.1;
+        o.position.z += speed;
+        if(o.position.z>camera.position.z+5){ scene.remove(o); obstacles.splice(i,1); score += 1*(combo>1?combo:1); comboTimer++; }
+        else if(player.position.distanceTo(o.position)<1){
+            createParticles(o.position.x,o.position.y,o.position.z,0xff0000,15);
+            if(shield){ shield=false; scene.remove(o); obstacles.splice(i,1); powerupSound.play();}
+            else{ hitSound.play(); gameOver=true; document.getElementById('gameOver').style.display='block';
+                leaderboard.push({score,date:new Date().toLocaleDateString()});
+                leaderboard.sort((a,b)=>b.score-a.score);
+                localStorage.setItem('leaderboard',JSON.stringify(leaderboard.slice(0,10)));
+            }
+        }
+    }
+
+    // Collectibles
+    for(let i=collectibles.length-1;i>=0;i--){
+        const c = collectibles[i];
+        c.position.z+=speed;
+        c.rotation.y+=0.1;
+        if(c.position.z>camera.position.z+5){ scene.remove(c); collectibles.splice(i,1); combo=0; }
+        else if(player.position.distanceTo(c.position)<1){
+            createParticles(c.position.x,c.position.y,c.position.z,0xffff00,10);
+            collectSound.play();
+            score +=5*(combo>1?combo:1); combo+=1; comboTimer=100;
+            scene.remove(c); collectibles.splice(i,1);
+        }
+    }
+
+    // Power-ups
+    for(let i=powerups.length-1;i>=0;i--){
+        const p=powerups[i];
+        p.position.z+=speed;
+        p.rotation.y+=0.1;
+        if(p.position.z>camera.position.z+5){ scene.remove(p); powerups.splice(i,1); }
+        else if(player.position.distanceTo(p.position)<1){
+            shield=true; createParticles(p.position.x,p.position.y,p.position.z,0x00ffff,10); powerupSound.play();
+            scene.remove(p); powerups.splice(i,1);
+        }
+    }
+
+    // Particles
+    for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i];
+        p.position.x+=p.velocity.x; p.position.y+=p.velocity.y; p.position.z+=p.velocity.z;
+        p.velocity.y-=0.01;
+        if(p.position.y<0){ scene.remove(p); particles.splice(i,1); }
+    }
+
+    // Combo decay
+    if(comboTimer>0) comboTimer--; else combo=0;
+
+    // UI
+    document.getElementById('score').innerText="Score: "+score;
+    document.getElementById('combo').innerText="Combo: "+combo+"x";
+    document.getElementById('powerup').innerText="Shield: "+(shield?"ON":"OFF");
+
+    // Camera follow + small shake if chaos
+    camera.position.z = player.position.z + 10 + (chaosTimer>0 ? Math.sin(Date.now()*0.05)*0.3:0);
+    camera.position.x = player.position.x + (chaosTimer>0 ? Math.sin(Date.now()*0.1)*0.2:0);
+
+    renderer.render(scene,camera);
+}
+
+animate();
+
+</script>
+</body>
+</html>
