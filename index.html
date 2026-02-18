@@ -10,6 +10,8 @@ body { margin:0; overflow:hidden; background:#111; font-family:sans-serif; }
 #powerup { position:absolute; top:70px; left:10px; font-size:20px; color:#0ff; }
 #gameOver { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
             font-size:36px; display:none; text-align:center; color:#f44; }
+#startScreen { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+               font-size:36px; color:#fff; text-align:center; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -18,8 +20,9 @@ body { margin:0; overflow:hidden; background:#111; font-family:sans-serif; }
 <div id="combo">Combo: 0x</div>
 <div id="powerup">Shield: OFF</div>
 <div id="gameOver">Game Over!<br>Refresh to play again.</div>
+<div id="startScreen">Click or Tap to Start</div>
 
-<audio id="bgm" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_2aabff6b3f.mp3?filename=funk-loop-01-110880.mp3" loop autoplay></audio>
+<audio id="bgm" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_2aabff6b3f.mp3?filename=funk-loop-01-110880.mp3" loop></audio>
 <audio id="jumpSound" src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_52b9623e3f.mp3?filename=jump-4388.mp3"></audio>
 <audio id="collectSound" src="https://cdn.pixabay.com/download/audio/2021/08/04/audio_c9bb081123.mp3?filename=coin-48470.mp3"></audio>
 <audio id="powerupSound" src="https://cdn.pixabay.com/download/audio/2022/03/01/audio_71b3a6c1b2.mp3?filename=powerup-5017.mp3"></audio>
@@ -35,6 +38,13 @@ camera.position.set(0,6,12);
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
+
+// --- Handle Resize ---
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
 
 // --- Lights ---
 const light = new THREE.DirectionalLight(0xffffff,1);
@@ -70,12 +80,13 @@ const powerups = [];
 const particles = [];
 
 // --- Sounds ---
+const bgm = document.getElementById('bgm');
 const jumpSound = document.getElementById('jumpSound');
 const collectSound = document.getElementById('collectSound');
 const powerupSound = document.getElementById('powerupSound');
 const hitSound = document.getElementById('hitSound');
 
-// --- Helper: create particles ---
+// --- Helper: particles ---
 function createParticles(x,y,z,color,count=10){
     for(let i=0;i<count;i++){
         const geo = new THREE.SphereGeometry(0.05,4,4);
@@ -157,13 +168,14 @@ let comboTimer=0;
 let shield=false;
 let gameOver=false;
 let chaosTimer=0;
+let animationStarted=false;
 
 // --- Leaderboard ---
 let leaderboard = JSON.parse(localStorage.getItem('leaderboard')) || [];
 
 // --- Animate ---
 function animate(){
-    if(gameOver) return;
+    if(!animationStarted || gameOver) return;
     requestAnimationFrame(animate);
 
     // Player
@@ -254,7 +266,13 @@ function animate(){
     renderer.render(scene,camera);
 }
 
-animate();
+// --- Start Game on Click ---
+document.getElementById('startScreen').addEventListener('click', () => {
+    bgm.play();
+    animationStarted = true;
+    document.getElementById('startScreen').style.display='none';
+    animate();
+});
 
 </script>
 </body>
